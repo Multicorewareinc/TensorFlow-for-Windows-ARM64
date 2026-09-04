@@ -29,10 +29,24 @@ In `tensorflow/c/experimental/filesystem/filesystem_interface.h`, removed `TF_Tr
 
 * `BatchFunction Operator`
     * Adds the `num_warmup_batch_threads` op attribute to support a separate thread pool for processing warmup requests.
+    * Adds the `per_criticality_batch_timeout_micros` op attribute to support different batch timeouts for different criticality levels.
 * `TensorFlow API`
     * Exports `__new__` in public API golden files for subclasses of `tuple` (like `tf.io.FixedLenFeature`) to fix false positives during static type checking.>
 * `tf.data`
     * Fixes a bug in `tf.data.Dataset.scan` where the shape of the state returned by `scan_func` was not strictly validated against the initial state.
+*   `tf.image.adjust_contrast`
+
+    *   Registers the missing Python gradient for the `AdjustContrastv2` op, so
+        `tf.image.adjust_contrast` can now be differentiated with
+        `GradientTape`. Fixes
+        [#126083](https://github.com/tensorflow/tensorflow/issues/126083).
+*   `tf.nn.softsign`
+
+    *   Fixes second-order gradients of `tf.nn.softsign`. Differentiating twice
+        previously failed with a lookup error because the `SoftsignGrad`
+        backward op had no registered Python gradient.
+
+
 *   `tf.experimental.numpy`
 
     *   `tf.experimental.numpy.isclose` and `tf.experimental.numpy.allclose` now
@@ -49,6 +63,13 @@ In `tensorflow/c/experimental/filesystem/filesystem_interface.h`, removed `TF_Tr
         `ConjugateTranspose` on a scalar. Fixes
         [#118340](https://github.com/tensorflow/tensorflow/issues/118340) and
         [#118345](https://github.com/tensorflow/tensorflow/issues/118345).
+
+*   `tf.image.non_max_suppression`
+
+    *   Fixes a segmentation fault under `jit_compile=True` when `boxes` and
+        `scores` are empty. The XLA lowering now returns an empty selection,
+        matching the non-XLA kernels. Fixes
+        [#117245](https://github.com/tensorflow/tensorflow/issues/117245).
 
 * <SIMILAR TO ABOVE SECTION, BUT FOR OTHER IMPORTANT CHANGES / BUG FIXES>
 * <IF A CHANGE CLOSES A GITHUB ISSUE, IT SHOULD BE DOCUMENTED HERE>
@@ -1871,7 +1892,7 @@ Add an upper bound for `protobuf` in `setup.py` since `protobuf` after version 3
     try it out, though be aware that the DTensor API is experimental and up-to
     backward-incompatible changes. DTensor and Keras integration is published
     under `tf.keras.dtensor` in this release (refer to the `tf.keras` entry).
-    The tutoral and guide for DTensor will be published on
+    The tutorial and guide for DTensor will be published on
     https://www.tensorflow.org/. Please stay tuned.
 
 *   [oneDNN CPU performance optimizations](https://github.com/tensorflow/community/blob/master/rfcs/20210930-enable-onednn-ops.md)
@@ -3457,7 +3478,7 @@ This release introduces several vulnerability fixes:
     *   Promoting `tf.data.experimental.scan` API to `tf.data.Dataset.scan` and
         deprecating the experimental endpoint.
     *   Promoting `tf.data.experimental.snapshot` API to
-        `tf.data.Dataset.shapshot` and deprecating the experimental endpoint.
+        `tf.data.Dataset.snapshot` and deprecating the experimental endpoint.
     *   Promoting `tf.data.experimental.take_while` API to
         `tf.data.Dataset.take_while` and deprecating the experimental endpoint.
     *   Promoting `tf.data.experimental.ThreadingOptions` API to
@@ -8347,7 +8368,7 @@ love to hear your migration feedback and questions.
         transition canned Estimators that are warm started from
         `tf.train.Optimizers` to `tf.keras.optimizers`.
     *   Losses are scaled in canned estimator v2 and not in the optimizers
-        anymore. If you are using Estimator + distribution strategy + optimikzer
+        anymore. If you are using Estimator + distribution strategy + optimizer
         v1 then the behavior does not change. This implies that if you are using
         custom estimator with optimizer v2, you have to scale losses. We have
         new utilities to help scale losses `tf.nn.compute_average_loss`,

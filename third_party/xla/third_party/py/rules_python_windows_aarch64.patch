@@ -1,0 +1,6 @@
+--- a/python/private/pypi/pip_repository.bzl
++++ b/python/private/pypi/pip_repository.bzl
+@@ -94,2 +94,3 @@ def _pip_repository_impl(rctx):
+         "osx_x86_64",
++        "windows_aarch64",
+         "windows_x86_64",

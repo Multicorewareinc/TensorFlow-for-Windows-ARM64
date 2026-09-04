@@ -429,6 +429,15 @@ config_setting(
 )
 
 config_setting(
+    name = "windows_arm64",
+    constraint_values = [
+        "@platforms//cpu:aarch64",
+        "@platforms//os:windows",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
     name = "no_tensorflow_py_deps",
     define_values = {"no_tensorflow_py_deps": "true"},
     visibility = ["//visibility:public"],
@@ -1044,7 +1053,6 @@ package_group(
         "//tensorflow_models/google/recml/...",
         "//third_party/cloud_tpu/convergence_tools/sdc_monitoring/...",
         "//third_party/cloud_tpu/inference_converter/...",
-        "//third_party/odml/model_explorer/...",
         "//third_party/pathways/...",
         "//third_party/py/cloud_ml_autoflow/...",
         "//third_party/py/envlogger/...",
@@ -1735,8 +1743,6 @@ py_strict_library(
         "//tensorflow/lite/python/authoring",
         "//tensorflow/python:no_contrib",
         "//tensorflow/python/profiler:profiler_client",
-        "@pypi//keras_nightly",
-        "@pypi//tb_nightly",
     ],
 )
 # copybara:comment_end

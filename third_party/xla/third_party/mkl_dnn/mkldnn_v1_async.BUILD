@@ -167,7 +167,10 @@ _INCLUDES_LIST = [
     "src/cpu/gemm",
     "src/graph",
     "third_party",
-] + if_sycl_build_is_configured(
+] + select({
+    "@xla//xla/tsl:windows_arm64": ["third_party/xbyak_aarch64/xbyak_aarch64"],
+    "//conditions:default": [],
+}) + if_sycl_build_is_configured(
     [
         "include/oneapi",
         "include/oneapi/dnnl",
@@ -242,7 +245,10 @@ _TEXTUAL_HDRS_LIST = glob([
 # compiler doesn't clean up stack from temporary objects.)
 cc_library(
     name = "onednn_autogen",
-    srcs = glob(["src/cpu/x64/gemm/**/*_kern_autogen*.cpp"]),
+    srcs = select({
+        "@xla//xla/tsl:windows_arm64": [],
+        "//conditions:default": glob(["src/cpu/x64/gemm/**/*_kern_autogen*.cpp"]),
+    }),
     copts = [
         "-O1",
         "-U_FORTIFY_SOURCE",
@@ -268,7 +274,6 @@ cc_library(
             "src/cpu/*.cpp",
             "src/cpu/**/*.cpp",
             "src/cpu/jit_utils/**/*.cpp",
-            "src/cpu/x64/**/*.cpp",
             "src/graph/interface/*.cpp",
             "src/graph/backend/*.cpp",
             "src/graph/backend/dnnl/*.cpp",
@@ -285,10 +290,25 @@ cc_library(
             "src/cpu/aarch64/**",
             "src/cpu/ppc64/**",
             "src/cpu/rv64/**",
-            "src/cpu/x64/gemm/**/*_kern_autogen.cpp",
+            "src/cpu/x64/**",
             "src/cpu/sycl/**",
         ],
-    ),
+    ) + select({
+        "@xla//xla/tsl:windows_arm64": glob(
+            ["src/cpu/aarch64/**/*.cpp"],
+            exclude = [
+                "src/cpu/aarch64/acl_*.cpp",
+                "src/cpu/aarch64/**/acl_*.cpp",
+            ],
+        ) + [
+            "third_party/xbyak_aarch64/src/xbyak_aarch64_impl.cpp",
+            "third_party/xbyak_aarch64/src/util_impl.cpp",
+        ],
+        "//conditions:default": glob(
+            ["src/cpu/x64/**/*.cpp"],
+            exclude = ["src/cpu/x64/gemm/**/*_kern_autogen.cpp"],
+        ),
+    }),
     copts = _COPTS_LIST + [
         "-DDNNL_ENABLE_ITT_TASKS",  # Enable ITT for CPU
     ],
@@ -319,7 +339,6 @@ sycl_library(
             "src/cpu/**/*.cpp",
             "src/common/ittnotify/*.c",
             "src/cpu/jit_utils/**/*.cpp",
-            "src/cpu/x64/**/*.cpp",
             "src/graph/interface/*.cpp",
             "src/graph/backend/*.cpp",
             "src/graph/backend/dnnl/*.cpp",
@@ -345,14 +364,29 @@ sycl_library(
             "src/cpu/aarch64/**",
             "src/cpu/ppc64/**",
             "src/cpu/rv64/**",
-            "src/cpu/x64/gemm/**/*_kern_autogen.cpp",
+            "src/cpu/x64/**",
             "src/cpu/sycl/**",
             "src/common/ittnotify/**",
             "src/gpu/amd/**",
             "src/gpu/intel/conv/jit/v2/planner/planner_main.cpp",
             "src/gpu/nvidia/**",
         ],
-    ) + [
+    ) + select({
+        "@xla//xla/tsl:windows_arm64": glob(
+            ["src/cpu/aarch64/**/*.cpp"],
+            exclude = [
+                "src/cpu/aarch64/acl_*.cpp",
+                "src/cpu/aarch64/**/acl_*.cpp",
+            ],
+        ) + [
+            "third_party/xbyak_aarch64/src/xbyak_aarch64_impl.cpp",
+            "third_party/xbyak_aarch64/src/util_impl.cpp",
+        ],
+        "//conditions:default": glob(
+            ["src/cpu/x64/**/*.cpp"],
+            exclude = ["src/cpu/x64/gemm/**/*_kern_autogen.cpp"],
+        ),
+    }) + [
         ":header_generator",
         ":kernel_list_generator",
     ],

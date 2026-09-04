@@ -583,6 +583,11 @@ common:win_arm64_clang --@rules_python//python/config_settings:bootstrap_impl=zi
 common:win_arm64_clang --build_python_zip
 common:win_arm64_clang --define=no_nccl_support=true
 common:win_arm64_clang --repo_env=TF_NEED_CUDA=0
+common:win_arm64_clang --define=ynn_enable_arm64_sme=false
+common:win_arm64_clang --define=ynn_enable_arm64_sme2=false
+common:win_arm64_clang --define=tensorflow_mkldnn_contraction_kernel=0
+common:win_arm64_clang --define=build_with_mkl_aarch64=false
+common:win_arm64_clang --define=ynn_enable_arm64_neonfp8=false
 
 common:windows_x86_cpu_2022 --config=win_clang_base
 common:windows_x86_cpu_2022 --crosstool_top="//tensorflow/tools/toolchains/win2022/20241118:toolchain"

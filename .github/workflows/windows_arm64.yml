@@ -1,4 +1,4 @@
-```yaml
+
 name: Build TensorFlow Windows ARM64 Wheel
 
 on:
@@ -305,4 +305,3 @@ jobs:
           path: bazel-bin/tensorflow/tools/pip_package/wheel_house/*.whl
           if-no-files-found: error
           retention-days: 14
-```

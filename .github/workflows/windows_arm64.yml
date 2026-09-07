@@ -2,10 +2,6 @@ name: Build TensorFlow Windows ARM64 Wheel
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
 
 jobs:
   build-windows-arm64:

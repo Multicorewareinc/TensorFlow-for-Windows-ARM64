@@ -1,4 +1,3 @@
-
 # Copyright 2017 The TensorFlow Authors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -84,11 +83,7 @@ def _tf_http_archive_impl(ctx):
                     ctx.patch(patch_file, strip = 1)
 
         for cmd in ctx.attr.patch_cmds:
-            res = ctx.execute([
-                "C:/msys64/usr/bin/bash.exe",
-                "-c",
-                "export PATH=/usr/bin:/bin:$PATH; " + cmd,
-            ])
+            res = ctx.execute(["bash", "-c", cmd])
             if res.return_code != 0:
                 fail("patch_cmds failed: %s\n%s" % (cmd, res.stderr))
 

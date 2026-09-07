@@ -1,50 +1,63 @@
-name: Build Windows ARM64 Wheel
+name: Build TensorFlow Windows ARM64 Wheel
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
   build-windows-arm64:
     runs-on: windows-11-vs2026-arm
 
     steps:
+      # ------------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # ------------------------------------------------------------
+      # Python 3.13
+      # ------------------------------------------------------------
       - name: Set up Python 3.13
         shell: powershell
         run: |
-          $python = "C:\hostedtoolcache\windows\Python\3.13.0\arm64"
+          $python = "C:\hostedtoolcache\windows\Python\3.13.15\arm64"
 
-          if (Test-Path $python) {
-            Add-Content $env:GITHUB_PATH $python
-            Add-Content $env:GITHUB_PATH "$python\Scripts"
-          } else {
-            Write-Host "Python 3.13 ARM64 was not found in the expected location."
-            Write-Host "Searching for Python 3.13..."
+          if (-not (Test-Path "$python\python.exe")) {
+            Write-Host "Python 3.13.15 not found at expected location."
 
             $pythonExe = Get-ChildItem `
               "C:\hostedtoolcache\windows\Python" `
               -Recurse `
               -Filter python.exe `
               -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match "3\.13" } |
+              Where-Object {
+                $_.FullName -match "3\.13.*\\arm64\\python\.exe$"
+              } |
               Select-Object -First 1
 
             if (-not $pythonExe) {
               throw "Python 3.13 ARM64 was not found."
             }
 
-            $pythonDir = Split-Path $pythonExe.FullName
-            Add-Content $env:GITHUB_PATH $pythonDir
-            Add-Content $env:GITHUB_PATH "$pythonDir\Scripts"
+            $python = Split-Path $pythonExe.FullName
           }
 
-          python --version
-          python -c "import platform; print(platform.machine())"
+          Add-Content $env:GITHUB_PATH $python
+          Add-Content $env:GITHUB_PATH "$python\Scripts"
 
+          Write-Host "Python:"
+          & "$python\python.exe" --version
+          & "$python\python.exe" -c "import platform; print(platform.machine())"
+
+      # ------------------------------------------------------------
+      # Bazel 7.7.0 ARM64
+      # ------------------------------------------------------------
       - name: Install Bazel 7.7.0
         shell: powershell
         run: |
@@ -52,7 +65,10 @@ jobs:
           $bazelExe = "$bazelDir\bazel.exe"
           $url = "https://github.com/bazelbuild/bazel/releases/download/7.7.0/bazel-7.7.0-windows-arm64.exe"
 
-          New-Item -ItemType Directory -Force -Path $bazelDir | Out-Null
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $bazelDir | Out-Null
 
           Invoke-WebRequest `
             -Uri $url `
@@ -60,8 +76,12 @@ jobs:
 
           Add-Content $env:GITHUB_PATH $bazelDir
 
+          Write-Host "Bazel:"
           & $bazelExe --version
-          
+
+      # ------------------------------------------------------------
+      # MSYS2 ARM64
+      # ------------------------------------------------------------
       - name: Install MSYS2 ARM64
         shell: powershell
         run: |
@@ -92,51 +112,161 @@ jobs:
             throw "MSYS2 installation failed with exit code $($process.ExitCode)"
           }
 
-          if (-not (Test-Path "$installDir\usr\bin")) {
-            throw "MSYS2 was not installed correctly."
+          if (-not (Test-Path "$installDir\usr\bin\bash.exe")) {
+            throw "MSYS2 bash was not installed correctly."
           }
-
-          Add-Content $env:GITHUB_PATH "$installDir\usr\bin"
-          Add-Content $env:GITHUB_PATH "$installDir\mingw64\bin"
 
           Write-Host "MSYS2 installed successfully."
 
+      # ------------------------------------------------------------
+      # LLVM 21.1.8
+      # ------------------------------------------------------------
+      - name: Install LLVM 21.1.8
+        shell: powershell
+        run: |
+          $installer = "$env:RUNNER_TEMP\LLVM-21.1.8-woa64.exe"
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/LLVM-21.1.8-woa64.exe"
+          $installDir = "C:\Program Files\LLVM"
 
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $installer
+
+          Write-Host "Installing LLVM 21.1.8..."
+
+          Start-Process `
+            -FilePath $installer `
+            -ArgumentList "/S", "/D=$installDir" `
+            -Wait `
+            -NoNewWindow
+
+          if (-not (Test-Path "$installDir\bin\clang.exe")) {
+            throw "LLVM installation failed: clang.exe not found."
+          }
+
+          # Put LLVM at the beginning of PATH for this step.
+          $env:Path = "$installDir\bin;$env:Path"
+
+          # Persist LLVM for subsequent steps.
+          Add-Content $env:GITHUB_PATH "$installDir\bin"
+
+          Write-Host "LLVM:"
+          & "$installDir\bin\clang.exe" --version
+
+      # ------------------------------------------------------------
+      # Configure MSYS2 + Python
+      # ------------------------------------------------------------
+      - name: Configure MSYS2 and Python
+        shell: powershell
+        run: |
+          # Make MSYS2 bash available.
+          $env:Path += ";C:\tools\msys64\usr\bin"
+
+          Add-Content $env:GITHUB_PATH "C:\tools\msys64\usr\bin"
+
+          # Locate Python 3.13 ARM64.
+          $pythonExe = Get-Command python.exe | Select-Object -First 1
+
+          if (-not $pythonExe) {
+            throw "python.exe was not found."
+          }
+
+          $pythonDir = Split-Path $pythonExe.Source
+          $python = Join-Path $pythonDir "python.exe"
+          $python3 = Join-Path $pythonDir "python3.exe"
+
+          # TensorFlow/Bazel expects python3 in some shell commands.
+          Copy-Item `
+            -Path $python `
+            -Destination $python3 `
+            -Force
+
+          Write-Host "Python:"
+          python --version
+          python3 --version
+
+          Write-Host "Bash:"
+          & "C:\tools\msys64\usr\bin\bash.exe" --version
+
+          Write-Host "LLVM:"
+          clang --version
+
+      # ------------------------------------------------------------
+      # Verify complete build environment
+      # ------------------------------------------------------------
       - name: Verify build environment
         shell: powershell
         run: |
-          Write-Host "=== Architecture ==="
+          Write-Host "========================================"
+          Write-Host "Architecture"
+          Write-Host "========================================"
+
           [System.Environment]::Is64BitOperatingSystem
           $env:PROCESSOR_ARCHITECTURE
 
-          Write-Host "=== Python ==="
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "Python"
+          Write-Host "========================================"
+
           python --version
+          python3 --version
           python -c "import sys, platform; print(sys.executable); print(platform.machine())"
 
-          Write-Host "=== Bazel ==="
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "Bazel"
+          Write-Host "========================================"
+
           bazel --version
 
-          Write-Host "=== LLVM ==="
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "LLVM"
+          Write-Host "========================================"
+
+          Get-Command clang -All
           clang --version
 
-          Write-Host "=== Git ==="
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "Bash"
+          Write-Host "========================================"
+
+          Get-Command bash -All
+          & "C:\tools\msys64\usr\bin\bash.exe" --version
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "Git"
+          Write-Host "========================================"
+
           git --version
 
+      # ------------------------------------------------------------
+      # Build TensorFlow wheel
+      # ------------------------------------------------------------
       - name: Build TensorFlow wheel
         shell: powershell
         env:
           HERMETIC_PYTHON_VERSION: "3.13"
           TF_PYTHON_VERSION: "3.13"
         run: |
+          # Make MSYS2 bash available to TensorFlow's repository rules.
+          $env:Path += ";C:\tools\msys64\usr\bin"
+
           bazel --output_base=C:\_bzl build `
             --config=release_cpu_windows_arm64 `
-            --action_env=PATH="$env:PATH" `
+            --action_env=PATH="$env:Path" `
             --repo_env=HERMETIC_PYTHON_VERSION=3.13 `
             --repo_env=TF_PYTHON_VERSION=3.13 `
             //tensorflow/tools/pip_package:wheel `
             --verbose_failures
 
-      - name: Locate generated wheel
+      # ------------------------------------------------------------
+      # Verify generated wheel
+      # ------------------------------------------------------------
+      - name: Verify generated wheel
         shell: powershell
         run: |
           $wheelDir = "bazel-bin\tensorflow\tools\pip_package\wheel_house"
@@ -145,17 +275,29 @@ jobs:
             throw "Wheel directory was not generated: $wheelDir"
           }
 
-          Write-Host "Generated wheels:"
-          Get-ChildItem $wheelDir -Filter "*.whl" -Recurse |
-            ForEach-Object {
-              Write-Host $_.FullName
-            }
+          $wheels = Get-ChildItem `
+            $wheelDir `
+            -Filter "*.whl" `
+            -Recurse
 
-      - name: Upload wheel artifact
+          if ($wheels.Count -eq 0) {
+            throw "No wheel was generated."
+          }
+
+          Write-Host "Generated wheel(s):"
+
+          foreach ($wheel in $wheels) {
+            Write-Host $wheel.FullName
+          }
+
+      # ------------------------------------------------------------
+      # Upload wheel
+      # ------------------------------------------------------------
+      - name: Upload TensorFlow Windows ARM64 wheel
         uses: actions/upload-artifact@v4
         with:
           name: tensorflow-windows-arm64-wheel
           path: bazel-bin/tensorflow/tools/pip_package/wheel_house/*.whl
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 180
 

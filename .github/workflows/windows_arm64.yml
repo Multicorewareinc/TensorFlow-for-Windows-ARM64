@@ -1,3 +1,4 @@
+```yaml
 name: Build TensorFlow Windows ARM64 Wheel
 
 on:
@@ -25,8 +26,6 @@ jobs:
           $python = "C:\hostedtoolcache\windows\Python\3.13.15\arm64"
 
           if (-not (Test-Path "$python\python.exe")) {
-            Write-Host "Python 3.13.15 not found at expected location."
-
             $pythonExe = Get-ChildItem `
               "C:\hostedtoolcache\windows\Python" `
               -Recurse `
@@ -140,7 +139,7 @@ jobs:
             throw "LLVM installation failed: clang.exe not found."
           }
 
-          # Put LLVM at the beginning of PATH for this step.
+          # Put our LLVM first for this step.
           $env:Path = "$installDir\bin;$env:Path"
 
           # Persist LLVM for subsequent steps.
@@ -160,22 +159,32 @@ jobs:
 
           Add-Content $env:GITHUB_PATH "C:\tools\msys64\usr\bin"
 
-          # Locate Python 3.13 ARM64.
-          $pythonExe = Get-Command python.exe | Select-Object -First 1
+          # Locate the installed Python 3.13 ARM64.
+          $pythonExe = (Get-Command python.exe).Source
+          $pythonDir = Split-Path $pythonExe
+          $python3Exe = Join-Path $pythonDir "python3.exe"
 
-          if (-not $pythonExe) {
-            throw "python.exe was not found."
+          Write-Host "Python installation directory:"
+          Write-Host $pythonDir
+
+          # Copy python.exe -> python3.exe in the same installation directory.
+          # The hosted runner may already have python3.exe.
+          # Remove it first if possible.
+          if (Test-Path $python3Exe) {
+            try {
+              Remove-Item $python3Exe -Force -ErrorAction Stop
+            }
+            catch {
+              Write-Host "Existing python3.exe is locked; keeping the existing file."
+            }
           }
 
-          $pythonDir = Split-Path $pythonExe.Source
-          $python = Join-Path $pythonDir "python.exe"
-          $python3 = Join-Path $pythonDir "python3.exe"
-
-          # TensorFlow/Bazel expects python3 in some shell commands.
-          Copy-Item `
-            -Path $python `
-            -Destination $python3 `
-            -Force
+          if (-not (Test-Path $python3Exe)) {
+            Copy-Item `
+              -Path $pythonExe `
+              -Destination $python3Exe `
+              -Force
+          }
 
           Write-Host "Python:"
           python --version
@@ -188,7 +197,7 @@ jobs:
           clang --version
 
       # ------------------------------------------------------------
-      # Verify complete build environment
+      # Verify environment
       # ------------------------------------------------------------
       - name: Verify build environment
         shell: powershell
@@ -197,8 +206,8 @@ jobs:
           Write-Host "Architecture"
           Write-Host "========================================"
 
-          [System.Environment]::Is64BitOperatingSystem
-          $env:PROCESSOR_ARCHITECTURE
+          Write-Host "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
+          Write-Host "64-bit OS=$([System.Environment]::Is64BitOperatingSystem)"
 
           Write-Host ""
           Write-Host "========================================"
@@ -248,7 +257,7 @@ jobs:
           HERMETIC_PYTHON_VERSION: "3.13"
           TF_PYTHON_VERSION: "3.13"
         run: |
-          # Make MSYS2 bash available to TensorFlow's repository rules.
+          # Make MSYS2 bash available to TensorFlow repository rules.
           $env:Path += ";C:\tools\msys64\usr\bin"
 
           bazel --output_base=C:\_bzl build `
@@ -260,7 +269,7 @@ jobs:
             --verbose_failures
 
       # ------------------------------------------------------------
-      # Verify generated wheel
+      # Verify wheel
       # ------------------------------------------------------------
       - name: Verify generated wheel
         shell: powershell
@@ -287,7 +296,7 @@ jobs:
           }
 
       # ------------------------------------------------------------
-      # Upload wheel
+      # Upload wheel artifact
       # ------------------------------------------------------------
       - name: Upload TensorFlow Windows ARM64 wheel
         uses: actions/upload-artifact@v4
@@ -295,5 +304,5 @@ jobs:
           name: tensorflow-windows-arm64-wheel
           path: bazel-bin/tensorflow/tools/pip_package/wheel_house/*.whl
           if-no-files-found: error
-          retention-days: 180
-
+          retention-days: 14
+```

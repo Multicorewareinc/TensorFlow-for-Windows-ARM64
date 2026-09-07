@@ -19,6 +19,7 @@ import os
 
 from absl.testing import parameterized
 import numpy as np
+
 from tensorflow.compiler.tests import xla_test
 from tensorflow.python.eager import def_function
 from tensorflow.python.framework import constant_op
@@ -40,7 +41,8 @@ class ListOpsTest(parameterized.TestCase, xla_test.XLATestCase):
     # the element shape.
     with self.session() as sess, self.test_scope():
       l = list_ops.tensor_list_reserve(
-          element_shape=[2], element_dtype=dtypes.float32, num_elements=0)
+          element_shape=[2], element_dtype=dtypes.float32, num_elements=0
+      )
       e = list_ops.tensor_list_get_item(l, 0, element_dtype=dtypes.float32)
       self.assertAllEqual(sess.run(e), [0.0, 0.0])
 

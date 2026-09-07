@@ -1,0 +1,168 @@
+name: Build Windows ARM64 Wheel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-arm64:
+    runs-on: windows-11-vs2026-arm
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        shell: powershell
+        run: |
+          $python = "C:\hostedtoolcache\windows\Python\3.13.0\arm64"
+
+          if (Test-Path $python) {
+            Add-Content $env:GITHUB_PATH $python
+            Add-Content $env:GITHUB_PATH "$python\Scripts"
+          } else {
+            Write-Host "Python 3.13 ARM64 was not found in the expected location."
+            Write-Host "Searching for Python 3.13..."
+
+            $pythonExe = Get-ChildItem `
+              "C:\hostedtoolcache\windows\Python" `
+              -Recurse `
+              -Filter python.exe `
+              -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match "3\.13" } |
+              Select-Object -First 1
+
+            if (-not $pythonExe) {
+              throw "Python 3.13 ARM64 was not found."
+            }
+
+            $pythonDir = Split-Path $pythonExe.FullName
+            Add-Content $env:GITHUB_PATH $pythonDir
+            Add-Content $env:GITHUB_PATH "$pythonDir\Scripts"
+          }
+
+          python --version
+          python -c "import platform; print(platform.machine())"
+
+      - name: Install Bazel 7.7.0
+        shell: powershell
+        run: |
+          $bazelDir = "C:\tools\bazel"
+          $bazelExe = "$bazelDir\bazel.exe"
+          $url = "https://github.com/bazelbuild/bazel/releases/download/7.7.0/bazel-7.7.0-windows-arm64.exe"
+
+          New-Item -ItemType Directory -Force -Path $bazelDir | Out-Null
+
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $bazelExe
+
+          Add-Content $env:GITHUB_PATH $bazelDir
+
+          & $bazelExe --version
+
+      - name: Install MSYS2 ARM64
+        shell: powershell
+        run: |
+          $installer = "$env:RUNNER_TEMP\msys2-arm64.exe"
+          $url = "https://github.com/msys2/msys2-installer/releases/download/2026-06-11/msys2-arm64-20260611.exe"
+          $installDir = "C:\tools\msys64"
+
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $installer
+
+          Start-Process `
+            -FilePath $installer `
+            -ArgumentList "--root", $installDir, "install" `
+            -Wait `
+            -NoNewWindow
+
+          if (-not (Test-Path $installDir)) {
+            throw "MSYS2 installation failed."
+          }
+
+          Add-Content $env:GITHUB_PATH "$installDir\usr\bin"
+          Add-Content $env:GITHUB_PATH "$installDir\mingw64\bin"
+
+      - name: Install LLVM 21.1.8
+        shell: powershell
+        run: |
+          $installer = "$env:RUNNER_TEMP\LLVM-21.1.8-woa64.exe"
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/LLVM-21.1.8-woa64.exe"
+          $installDir = "C:\tools\llvm"
+
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $installer
+
+          Start-Process `
+            -FilePath $installer `
+            -ArgumentList "/S", "/D=$installDir" `
+            -Wait `
+            -NoNewWindow
+
+          if (-not (Test-Path $installDir)) {
+            throw "LLVM installation failed."
+          }
+
+          Add-Content $env:GITHUB_PATH "$installDir\bin"
+
+      - name: Verify build environment
+        shell: powershell
+        run: |
+          Write-Host "=== Architecture ==="
+          [System.Environment]::Is64BitOperatingSystem
+          $env:PROCESSOR_ARCHITECTURE
+
+          Write-Host "=== Python ==="
+          python --version
+          python -c "import sys, platform; print(sys.executable); print(platform.machine())"
+
+          Write-Host "=== Bazel ==="
+          bazel --version
+
+          Write-Host "=== LLVM ==="
+          clang --version
+
+          Write-Host "=== Git ==="
+          git --version
+
+      - name: Build TensorFlow wheel
+        shell: powershell
+        env:
+          HERMETIC_PYTHON_VERSION: "3.13"
+          TF_PYTHON_VERSION: "3.13"
+        run: |
+          bazel --output_base=C:\_bzl build `
+            --config=release_cpu_windows_arm64 `
+            --action_env=PATH="$env:PATH" `
+            --repo_env=HERMETIC_PYTHON_VERSION=3.13 `
+            --repo_env=TF_PYTHON_VERSION=3.13 `
+            //tensorflow/tools/pip_package:wheel `
+            --verbose_failures
+
+      - name: Locate generated wheel
+        shell: powershell
+        run: |
+          $wheelDir = "bazel-bin\tensorflow\tools\pip_package\wheel_house"
+
+          if (-not (Test-Path $wheelDir)) {
+            throw "Wheel directory was not generated: $wheelDir"
+          }
+
+          Write-Host "Generated wheels:"
+          Get-ChildItem $wheelDir -Filter "*.whl" -Recurse |
+            ForEach-Object {
+              Write-Host $_.FullName
+            }
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tensorflow-windows-arm64-wheel
+          path: bazel-bin/tensorflow/tools/pip_package/wheel_house/*.whl
+          if-no-files-found: error
+          retention-days: 14
+

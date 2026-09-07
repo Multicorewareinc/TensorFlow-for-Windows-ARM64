@@ -83,7 +83,11 @@ def _tf_http_archive_impl(ctx):
                     ctx.patch(patch_file, strip = 1)
 
         for cmd in ctx.attr.patch_cmds:
-            res = ctx.execute(["bash", "-c", cmd])
+            res = ctx.execute([
+                "C:/tools/msys64/usr/bin/bash.exe",
+                "-c",
+                "export PATH=/usr/bin:/bin:$PATH; " + cmd,
+            ])
             if res.return_code != 0:
                 fail("patch_cmds failed: %s\n%s" % (cmd, res.stderr))
 

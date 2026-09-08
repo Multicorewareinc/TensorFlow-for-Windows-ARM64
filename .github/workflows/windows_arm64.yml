@@ -23,7 +23,7 @@ jobs:
       - name: Set up Python 3.13
         shell: powershell
         run: |
-          $python = "C:\hostedtoolcache\windows\Python\3.13.15\arm64"
+          $python = "C:\Users\HCKTest\AppData\Local\Programs\Python\Python313-arm64"
 
           if (-not (Test-Path "$python\python.exe")) {
             $pythonExe = Get-ChildItem `

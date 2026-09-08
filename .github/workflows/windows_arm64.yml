@@ -75,56 +75,6 @@ jobs:
           & $bazelExe --version
 
       # ------------------------------------------------------------
-      # MSYS2 ARM64
-      # ------------------------------------------------------------
-      - name: Install MSYS2 ARM64
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $installer = "$env:RUNNER_TEMP\msys2-arm64.exe"
-          $installDir = "C:\tools\msys64"
-          $url = "https://github.com/msys2/msys2-installer/releases/download/2026-06-11/msys2-arm64-20260611.exe"
-
-          Invoke-WebRequest `
-            -Uri $url `
-            -OutFile $installer
-
-          Write-Host "Installer: $installer"
-          Write-Host "Install directory: $installDir"
-
-          Write-Host "Running MSYS2 installer..."
-
-          $args = @(
-            "in",
-            "--confirm-command",
-            "--accept-messages",
-            "--root",
-            "C:/tools/msys64"
-          )
-
-          $process = Start-Process `
-            -FilePath $installer `
-            -ArgumentList $args `
-            -Wait `
-            -PassThru `
-            -NoNewWindow
-
-          Write-Host "MSYS2 installer exit code: $($process.ExitCode)"
-
-          if ($process.ExitCode -ne 0) {
-            throw "MSYS2 installation failed with exit code $($process.ExitCode)"
-          }
-
-          if (-not (Test-Path "$installDir\usr\bin\bash.exe")) {
-            throw "MSYS2 bash was not installed correctly."
-          }
-
-          Write-Host "MSYS2 installed successfully."
-
-          & "$installDir\usr\bin\bash.exe" --version
-
-      # ------------------------------------------------------------
       # LLVM 21.1.8
       # ------------------------------------------------------------
       - name: Install LLVM 21.1.8

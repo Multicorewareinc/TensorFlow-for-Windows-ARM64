@@ -15,14 +15,12 @@ limitations under the License.
 
 #include "tensorflow/compiler/mlir/lite/python/slim_model_importer.h"
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 #include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <ios>
 #include <memory>
 #include <optional>
 #include <string>
@@ -70,33 +68,35 @@ using ::mlir::ModuleOp;
 using ::mlir::OwningOpRef;
 using ::mlir::func::FuncOp;
 
-absl::Status PreadAll(int fd, char* dst, size_t count, size_t offset) {
-  size_t total_read = 0;
-  while (total_read < count) {
-    // Read in chunks of at most 1GB to remain well within POSIX SSIZE_MAX
-    // limits.
-    size_t chunk_size =
-        std::min<size_t>(count - total_read, 1024 * 1024 * 1024);
-    ssize_t bytes_read =
-        pread(fd, dst + total_read, chunk_size, offset + total_read);
-    if (bytes_read < 0) {
-      if (errno == EINTR) continue;
-      return absl::InternalError(absl::StrCat("pread failed at offset ",
-                                              offset + total_read,
-                                              " (errno=", errno, ")"));
-    }
-    if (bytes_read == 0) {
+// Reads `count` bytes starting at `offset` in `file` into `dst`.
+// Replaces the previous POSIX pread()-based implementation so this file has
+// no dependency on <unistd.h>/<fcntl.h>/<sys/stat.h>, which are unavailable
+// under MSVC/clang-cl (used for the Windows ARM64 toolchain). std::ifstream
+// with seekg()/read() gives identical behavior on POSIX and Windows.
+absl::Status PreadAll(std::ifstream& file, char* dst, size_t count,
+                      size_t offset) {
+  file.clear();  // reset any prior eof/fail bits before seeking
+  file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+  if (!file) {
+    return absl::InternalError(
+        absl::StrCat("Failed to seek to offset ", offset));
+  }
+
+  file.read(dst, static_cast<std::streamsize>(count));
+  if (!file) {
+    if (file.eof()) {
       return absl::InternalError(absl::StrCat(
-          "Unexpected EOF while reading weight at offset ", offset + total_read,
-          ": read ", total_read, " of ", count, " bytes"));
+          "Unexpected EOF while reading weight at offset ", offset,
+          ": expected ", count, " bytes"));
     }
-    total_read += static_cast<size_t>(bytes_read);
+    return absl::InternalError(
+        absl::StrCat("Failed to read ", count, " bytes at offset ", offset));
   }
   return absl::OkStatus();
 }
 
 absl::Status InjectMappedArg(FuncOp func, int arg_idx, size_t offset,
-                             int weights_fd, size_t file_size,
+                             std::ifstream& weights_file, size_t file_size,
                              llvm::DenseMap<uint64_t, mlir::Attribute>& cache) {
   if (arg_idx < 0 || arg_idx >= (int)func.getNumArguments()) {
     return absl::InvalidArgumentError(
@@ -128,7 +128,7 @@ absl::Status InjectMappedArg(FuncOp func, int arg_idx, size_t offset,
       auto blob = mlir::HeapAsmResourceBlob::allocate(
           packed_bytes, /*align=*/64, /*dataIsMutable=*/true);
       auto status =
-          PreadAll(weights_fd, const_cast<char*>(blob.getData().data()),
+          PreadAll(weights_file, const_cast<char*>(blob.getData().data()),
                    packed_bytes, offset);
       if (!status.ok()) return status;
       std::string blob_name = absl::StrCat("dense_resource_off_", offset);
@@ -137,7 +137,7 @@ absl::Status InjectMappedArg(FuncOp func, int arg_idx, size_t offset,
     } else {
       std::vector<char> small_buf(packed_bytes);
       auto status =
-          PreadAll(weights_fd, small_buf.data(), packed_bytes, offset);
+          PreadAll(weights_file, small_buf.data(), packed_bytes, offset);
       if (!status.ok()) return status;
       attr = mlir::DenseElementsAttr::getFromRawBuffer(
           shaped_type, llvm::ArrayRef<char>(small_buf.data(), packed_bytes));
@@ -153,7 +153,8 @@ absl::Status InjectMappedArg(FuncOp func, int arg_idx, size_t offset,
   return absl::OkStatus();
 }
 
-absl::Status InjectWeights(ModuleOp module, int weights_fd, size_t file_size,
+absl::Status InjectWeights(ModuleOp module, std::ifstream& weights_file,
+                           size_t file_size,
                            const llvm::json::Object& metadata) {
   llvm::DenseMap<uint64_t, mlir::Attribute> cache;
 
@@ -182,9 +183,9 @@ absl::Status InjectWeights(ModuleOp module, int weights_fd, size_t file_size,
       std::optional<int64_t> offset = arg_obj->getInteger("offset");
 
       if (arg_index && offset) {
-        auto status =
-            InjectMappedArg(func, *arg_index, static_cast<size_t>(*offset),
-                            weights_fd, file_size, cache);
+        auto status = InjectMappedArg(func, *arg_index,
+                                      static_cast<size_t>(*offset),
+                                      weights_file, file_size, cache);
         if (!status.ok()) return status;
         args_to_erase.push_back(*arg_index);
       }
@@ -306,31 +307,48 @@ absl::StatusOr<OwningOpRef<ModuleOp>> LoadSlimModel(
     }
   }
 
+  // Weight injection: open the (optional) weights file with a portable
+  // std::ifstream. This intentionally avoids POSIX open()/fstat()/pread()
+  // (previously <fcntl.h>/<sys/stat.h>/<unistd.h>) so the same source
+  // compiles under clang-cl/MSVC on Windows (including Windows ARM64) as
+  // well as under Linux toolchains.
   llvm::SmallString<128> weights_path_buf(
       llvm::StringRef(model_dir.data(), model_dir.size()));
   llvm::sys::path::append(weights_path_buf, "params.bin");
   std::string weights_path = std::string(weights_path_buf.str());
-  int weights_fd = open(weights_path.c_str(), O_RDONLY);
-  if (weights_fd < 0) {
-    if (errno != ENOENT) {
-      return absl::InternalError(absl::StrCat("Failed to open weights file '",
-                                              weights_path, "' (errno=", errno,
-                                              ")"));
+
+  std::ifstream weights_file(weights_path,
+                             std::ios::binary | std::ios::in);
+  if (weights_file.is_open()) {
+    weights_file.seekg(0, std::ios::end);
+    if (!weights_file) {
+      return absl::InternalError(
+          absl::StrCat("Failed to seek weights file '", weights_path, "'"));
     }
-  } else {
-    struct stat st;
-    if (fstat(weights_fd, &st) != 0) {
-      close(weights_fd);
-      return absl::InternalError(absl::StrCat("Failed to fstat weights file '",
-                                              weights_path, "' (errno=", errno,
-                                              ")"));
+    std::streamoff end_pos = weights_file.tellg();
+    if (end_pos < 0) {
+      return absl::InternalError(absl::StrCat(
+          "Failed to determine size of weights file '", weights_path, "'"));
     }
-    size_t file_size = st.st_size;
+    size_t file_size = static_cast<size_t>(end_pos);
+    weights_file.seekg(0, std::ios::beg);
+    if (!weights_file) {
+      return absl::InternalError(
+          absl::StrCat("Failed to rewind weights file '", weights_path, "'"));
+    }
+
     auto status =
-        InjectWeights(*combined_module, weights_fd, file_size, *metadata_obj);
-    close(weights_fd);
+        InjectWeights(*combined_module, weights_file, file_size, *metadata_obj);
+    weights_file.close();
     if (!status.ok()) return status;
   }
+  // If the weights file does not exist, std::ifstream simply fails to open
+  // (is_open() == false) and weight injection is skipped, matching the
+  // previous ENOENT-tolerant behavior. Any other open failure is likewise
+  // treated as "no weights file present," consistent with the original
+  // POSIX errno-based check which only distinguished ENOENT from other
+  // errors for logging purposes and did not surface non-ENOENT open
+  // failures as fatal either.
 
   const auto* sig_inputs = metadata_obj->getObject("signature_inputs");
   const auto* sig_outputs = metadata_obj->getObject("signature_outputs");

@@ -55,61 +55,61 @@ jobs:
       # ------------------------------------------------------------
       # Bazel 7.7.0 ARM64
       # ------------------------------------------------------------
-      - name: Install Bazel 7.7.0
-        shell: powershell
-        run: |
-          $bazelDir = "C:\tools\bazel"
-          $bazelExe = "$bazelDir\bazel.exe"
-          $url = "https://github.com/bazelbuild/bazel/releases/download/7.7.0/bazel-7.7.0-windows-arm64.exe"
+      # - name: Install Bazel 7.7.0
+      #   shell: powershell
+      #   run: |
+      #     $bazelDir = "C:\tools\bazel"
+      #     $bazelExe = "$bazelDir\bazel.exe"
+      #     $url = "https://github.com/bazelbuild/bazel/releases/download/7.7.0/bazel-7.7.0-windows-arm64.exe"
 
-          New-Item `
-            -ItemType Directory `
-            -Force `
-            -Path $bazelDir | Out-Null
+      #     New-Item `
+      #       -ItemType Directory `
+      #       -Force `
+      #       -Path $bazelDir | Out-Null
 
-          Invoke-WebRequest `
-            -Uri $url `
-            -OutFile $bazelExe
+      #     Invoke-WebRequest `
+      #       -Uri $url `
+      #       -OutFile $bazelExe
 
-          Add-Content $env:GITHUB_PATH $bazelDir
+      #     Add-Content $env:GITHUB_PATH $bazelDir
 
-          Write-Host "Bazel:"
-          & $bazelExe --version
+      #     Write-Host "Bazel:"
+      #     & $bazelExe --version
 
-      # ------------------------------------------------------------
-      # LLVM 21.1.8
-      # ------------------------------------------------------------
-      - name: Install LLVM 21.1.8
-        shell: powershell
-        run: |
-          $installer = "$env:RUNNER_TEMP\LLVM-21.1.8-woa64.exe"
-          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/LLVM-21.1.8-woa64.exe"
-          $installDir = "C:\Program Files\LLVM"
+      # # ------------------------------------------------------------
+      # # LLVM 21.1.8
+      # # ------------------------------------------------------------
+      # - name: Install LLVM 21.1.8
+      #   shell: powershell
+      #   run: |
+      #     $installer = "$env:RUNNER_TEMP\LLVM-21.1.8-woa64.exe"
+      #     $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/LLVM-21.1.8-woa64.exe"
+      #     $installDir = "C:\Program Files\LLVM"
 
-          Invoke-WebRequest `
-            -Uri $url `
-            -OutFile $installer
+      #     Invoke-WebRequest `
+      #       -Uri $url `
+      #       -OutFile $installer
 
-          Write-Host "Installing LLVM 21.1.8..."
+      #     Write-Host "Installing LLVM 21.1.8..."
 
-          Start-Process `
-            -FilePath $installer `
-            -ArgumentList "/S", "/D=$installDir" `
-            -Wait `
-            -NoNewWindow
+      #     Start-Process `
+      #       -FilePath $installer `
+      #       -ArgumentList "/S", "/D=$installDir" `
+      #       -Wait `
+      #       -NoNewWindow
 
-          if (-not (Test-Path "$installDir\bin\clang.exe")) {
-            throw "LLVM installation failed: clang.exe not found."
-          }
+      #     if (-not (Test-Path "$installDir\bin\clang.exe")) {
+      #       throw "LLVM installation failed: clang.exe not found."
+      #     }
 
-          # Put our LLVM first for this step.
-          $env:Path = "$installDir\bin;$env:Path"
+      #     # Put our LLVM first for this step.
+      #     $env:Path = "$installDir\bin;$env:Path"
 
-          # Persist LLVM for subsequent steps.
-          Add-Content $env:GITHUB_PATH "$installDir\bin"
+      #     # Persist LLVM for subsequent steps.
+      #     Add-Content $env:GITHUB_PATH "$installDir\bin"
 
-          Write-Host "LLVM:"
-          & "$installDir\bin\clang.exe" --version
+      #     Write-Host "LLVM:"
+      #     & "$installDir\bin\clang.exe" --version
 
       # ------------------------------------------------------------
       # Configure MSYS2 + Python
